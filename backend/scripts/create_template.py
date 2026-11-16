@@ -15,7 +15,7 @@ def main() -> None:
         raise SystemExit("请设置 SANDBOX_IMAGE，例如 docker.io/15688463267/ai-game-platform-sandbox:v1")
     name = os.environ.get("SANDBOX_TEMPLATE_NAME", "").strip()
     if not name:
-        name = f"ai-game-platform-sandbox-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
+        name = f"ai-game-platform-sbx-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
 
     print(f"构建模板：{name}")
     print(f"镜像：{image}")

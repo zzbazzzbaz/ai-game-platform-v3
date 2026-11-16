@@ -38,7 +38,8 @@ COPY assets/skills/ /opt/skills/
 
 COPY start-services.sh prepare-workspace.sh browser-kiosk.sh ready.sh /opt/sandbox/
 RUN chmod +x /opt/sandbox/*.sh \
-    && mkdir -p /home/user/workspace /home/user/input /home/user/.cache \
+    && mkdir -p /home/user/workspace /home/user/input /home/user/.cache /tmp/.X11-unix \
+    && chmod 1777 /tmp/.X11-unix \
     && chown -R user:user /home/user/workspace /home/user/input /home/user/.cache \
     && ln -sfn /opt/ms-playwright /home/user/.cache/ms-playwright
 

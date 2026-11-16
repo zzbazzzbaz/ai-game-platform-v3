@@ -210,6 +210,9 @@ class SandboxRegistry:
             scanned, archived, skipped, failed = await self._archive_from_db(
                 scanned, archived, skipped, failed
             )
+        scanned, archived, skipped, failed = await self._archive_retries(
+            scanned, archived, skipped, failed
+        )
         return {
             "scanned": scanned,
             "archived": archived,
@@ -324,7 +327,8 @@ class SandboxRegistry:
             info = await self._client.AsyncSandbox.get_info(sandbox_id)
             if not _is_paused(info):
                 return {"status": "running"}
-        if not force and not self._paused_long_enough(info):
+        retry_due = row.archive_retry_at is not None and row.archive_retry_at <= _now()
+        if not force and not retry_due and not self._paused_long_enough(info):
             return {"status": "not_due"}
 
         await self._set_state(game_id, "archiving", last_error=None)
@@ -354,6 +358,7 @@ class SandboxRegistry:
                 "archived",
                 sandbox_id=None,
                 archive_retry_at=None,
+                archive_attempts=0,
                 last_error=None,
             )
             logger.info(
@@ -411,6 +416,43 @@ class SandboxRegistry:
             except Exception:
                 failed += 1
                 logger.exception("数据库回退归档失败 game=%s", row.game_id)
+                continue
+            if result.get("status") == "archived":
+                archived += 1
+            else:
+                skipped += 1
+        return scanned, archived, skipped, failed
+
+    async def _archive_retries(
+        self,
+        scanned: int,
+        archived: int,
+        skipped: int,
+        failed: int,
+    ) -> tuple[int, int, int, int]:
+        """归档失败后按 archive_retry_at 重试，不等下一次暂停满 2 小时。"""
+        async with self._sessions() as session:
+            rows = list(
+                (
+                    await session.scalars(
+                        select(SandboxSession).where(
+                            SandboxSession.sandbox_id.is_not(None),
+                            SandboxSession.archive_retry_at.is_not(None),
+                            SandboxSession.archive_retry_at <= _now(),
+                        )
+                    )
+                ).all()
+            )
+        for row in rows:
+            scanned += 1
+            try:
+                result = await self.archive(row.game_id, force=False)
+            except LockBusy:
+                skipped += 1
+                continue
+            except Exception:
+                failed += 1
+                logger.exception("归档重试失败 game=%s", row.game_id)
                 continue
             if result.get("status") == "archived":
                 archived += 1
@@ -488,7 +530,9 @@ class SandboxRegistry:
     async def _stop_game_server(self, sandbox: e2b.AsyncSandbox) -> None:
         await self._run(
             sandbox,
-            'pkill -f "[d]ev.mjs" >/dev/null 2>&1 || true; sleep 1; true',
+            'pkill -f "[d]ev.mjs" >/dev/null 2>&1 || true; '
+            'pkill -f "server/index\\.js" >/dev/null 2>&1 || true; '
+            "sleep 1; true",
             timeout=30,
         )
 
