@@ -55,9 +55,9 @@ async def _upload(prefix: str, files: dict[str, Path]) -> dict[str, str]:
     for filename, path in files.items():
         await store.put_file(f"{prefix}/{filename}", str(path))
     return {
-        "game": await store.presign_get(f"{prefix}/game-template.tar.gz"),
-        "skills": await store.presign_get(f"{prefix}/skills.tar.gz"),
-        "scripts": await store.presign_get(f"{prefix}/scripts.tar.gz"),
+        "game": await store.presign_get(f"{prefix}/game-template.tar.gz", expires=600),
+        "skills": await store.presign_get(f"{prefix}/skills.tar.gz", expires=600),
+        "scripts": await store.presign_get(f"{prefix}/scripts.tar.gz", expires=600),
     }
 
 
