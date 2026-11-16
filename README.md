@@ -98,7 +98,7 @@ make template
 E2B_TEMPLATE=<template_id>
 ```
 
-一代 runtime 不支持暂停/恢复，因此不作为模板方案。Docker Hub 镜像保留为可复现的构建产物，也方便后续迁移到 ACR EE。
+一代 runtime 不支持暂停/恢复，因此不作为模板方案。Docker Hub 镜像保留为可复现的构建产物；如果后续要用 ACR EE 走二代模板，需要按二代镜像要求补齐 `systemd`、`openssh-server`、`sudo`、`chrony`、`fuse3`、`iptables` 等组件。
 
 ## OSS
 
