@@ -140,6 +140,8 @@ ai-game-platform/games/<game_id>/workspace/<timestamp>.tar.gz
 - `SANDBOX_ARCHIVE_AFTER_SECONDS=7200`：暂停满 2 小时归档。
 - `SANDBOX_ARCHIVE_SCAN_SECONDS=300`：归档扫描间隔。
 
+预览页面在前台可见时，前端应每 240 秒调用一次 `POST /api/games/{id}/touch`。阿里云预览 HTTP 流量只会唤醒暂停沙盒，不会刷新 `end_at`，所以不能只依赖 iframe 流量续期。
+
 ## API
 
 ```bash
