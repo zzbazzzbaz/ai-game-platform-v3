@@ -7,6 +7,8 @@
 ## 平台语义
 
 - 沙盒由阿里云 Agent Sandbox 提供，通过 E2B 兼容协议调用。
+- 模板基于官方 `runtime-v2/base`，在构建步骤中安装游戏运行环境；规格 1 vCPU / 1024 MB。
+- 预览服务由后端在沙盒创建/恢复后执行 `/opt/sandbox/start-services.sh` 启动。
 - 创建参数：`timeout=600`、`on_timeout=pause`、`auto_resume=true`。
 - `connect(timeout=600)`、`files.*`、`commands.*` 会刷新空闲计时。
 - `get_info`、`list` 是控制面查询，不唤醒、不续期。

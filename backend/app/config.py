@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     e2b_api_url: str
     e2b_domain: str
     e2b_template: str
+    fcsandbox_team_id: str
+    aliyun_region: str
 
     # 沙箱生命周期
     sandbox_timeout: int
@@ -44,6 +46,7 @@ class Settings(BaseSettings):
     oss_access_key_secret: str
     oss_security_token: str
     oss_prefix: str
+    oss_proxy: str
 
     # Logfire
     logfire_token: str

@@ -71,13 +71,26 @@ make build-image
 
 ## 阿里云模板
 
-镜像推送后，用 E2B SDK 在阿里云创建 1C1G 模板：
+Docker Hub 镜像是构建产物，由 GitHub Actions 推送。阿里云第二代运行时（支持暂停/恢复）的自定义模板只接受官方公共镜像或 ACR EE，不能直接把 Docker Hub 镜像作为模板源；因此模板使用官方 `runtime-v2/base`，在构建步骤中安装 Playwright、noVNC 和游戏模板。
+
+前置条件：
+
+- 本机已登录阿里云 CLI（`aliyun configure list` 显示有效 profile）
+- `.env` 已填写 `FCSANDBOX_TEAM_ID` 和 `ALIYUN_REGION`
+- OSS 凭证可写 `ai-game-platform-oss`
+
+执行：
 
 ```bash
-cd backend
-SANDBOX_IMAGE=docker.io/<username>/ai-game-platform-sandbox:v1 \
-  uv run python scripts/create_template.py
+make template
 ```
+
+脚本会：
+
+1. 把 `sandbox/game-template`、`sandbox/assets/skills`、`sandbox/*.sh` 上传到 OSS
+2. 调用 `aliyun fcsandbox CreateTemplate`，规格 1 vCPU / 1024 MB / 15 GiB
+3. 轮询到 `ready`
+4. 输出 `TEMPLATE_ID`
 
 把输出的 `TEMPLATE_ID` 写入 `.env`：
 
@@ -85,7 +98,7 @@ SANDBOX_IMAGE=docker.io/<username>/ai-game-platform-sandbox:v1 \
 E2B_TEMPLATE=<template_id>
 ```
 
-模板构建时会把 `start-services.sh` 设为沙盒启动命令，把 `ready.sh` 设为就绪检查。
+一代 runtime 不支持暂停/恢复，因此不作为模板方案。Docker Hub 镜像保留为可复现的构建产物，也方便后续迁移到 ACR EE。
 
 ## OSS
 
@@ -103,6 +116,8 @@ aliyun oss mb oss://ai-game-platform-oss --redundancy-type LRS
 cd backend
 uv run python scripts/refresh_oss_token.py
 ```
+
+当前 `.env` 使用的是 CLI OAuth 的临时 STS 凭证，过期后重新执行上面的命令并重启后端；也可以直接在 `.env` 填永久 AK/SK，并清空 `OSS_SECURITY_TOKEN`。本机访问 OSS 需要代理时设置 `OSS_PROXY`，生产环境留空。
 
 快照路径：
 

@@ -33,6 +33,11 @@ class SnapshotStore:
                 settings.oss_access_key_id, settings.oss_access_key_secret
             )
         self._bucket = oss2.Bucket(auth, settings.oss_endpoint, settings.oss_bucket)
+        if settings.oss_proxy:
+            self._bucket.session.session.proxies = {
+                "http": settings.oss_proxy,
+                "https": settings.oss_proxy,
+            }
 
     def new_key(self, game_id: uuid.UUID) -> str:
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -86,6 +91,9 @@ class SnapshotStore:
 
     async def put_text(self, key: str, text: str) -> None:
         await asyncio.to_thread(self._bucket.put_object, key, text.encode())
+
+    async def put_file(self, key: str, path: str) -> None:
+        await asyncio.to_thread(self._bucket.put_object_from_file, key, path)
 
     async def get_bytes(self, key: str) -> bytes | None:
         def _get() -> bytes | None:

@@ -1,58 +1,231 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
+import shlex
+import shutil
+import subprocess
 import sys
+import tarfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from e2b import Template
-
 from app.config import settings
+from app.runtime.sandboxes.snapshots import SnapshotStore
+
+ROOT = Path(__file__).resolve().parents[2]
+SANDBOX_DIR = ROOT / "sandbox"
+BUILD_DIR = ROOT / ".build-template"
+
+TEAM_ID = settings.fcsandbox_team_id
+REGION = settings.aliyun_region
+BASE_IMAGE = (
+    f"fc-e2b-registry.{REGION}.cr.aliyuncs.com/runtime-v2/base:v0.0.53"
+)
+
+
+def _tar_dir(src: Path, dest: Path, excludes: set[str]) -> Path:
+    with tarfile.open(dest, "w:gz") as archive:
+        for child in src.iterdir():
+            if child.name in excludes:
+                continue
+            archive.add(child, arcname=child.name)
+    return dest
+
+
+def _tar_scripts(dest: Path) -> Path:
+    with tarfile.open(dest, "w:gz") as archive:
+        for script in (
+            "start-services.sh",
+            "prepare-workspace.sh",
+            "browser-kiosk.sh",
+            "ready.sh",
+        ):
+            archive.add(SANDBOX_DIR / script, arcname=script)
+    return dest
+
+
+async def _upload(prefix: str, files: dict[str, Path]) -> dict[str, str]:
+    store = SnapshotStore()
+    for filename, path in files.items():
+        await store.put_file(f"{prefix}/{filename}", str(path))
+    return {
+        "game": await store.presign_get(f"{prefix}/game-template.tar.gz"),
+        "skills": await store.presign_get(f"{prefix}/skills.tar.gz"),
+        "scripts": await store.presign_get(f"{prefix}/scripts.tar.gz"),
+    }
+
+
+def _aliyun(*args: str) -> dict[str, Any]:
+    command = [
+        "aliyun",
+        "fcsandbox",
+        *args,
+        "--region",
+        REGION,
+        "--version",
+        "2026-05-09",
+        "--force",
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.stderr.strip():
+        print(result.stderr.strip(), file=sys.stderr)
+    if result.returncode != 0:
+        raise SystemExit(result.stdout or result.stderr or "aliyun 命令失败")
+    return json.loads(result.stdout)
+
+
+def _build_steps(urls: dict[str, str]) -> list[dict[str, Any]]:
+    game = shlex.quote(urls["game"])
+    skills = shlex.quote(urls["skills"])
+    scripts = shlex.quote(urls["scripts"])
+    return [
+        {
+            "type": "RUN",
+            "args": [
+                (
+                    "sudo apt-get update && "
+                    "sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "
+                    "--no-install-recommends ca-certificates curl git less procps psmisc "
+                    "tar unzip xz-utils xvfb x11vnc novnc websockify "
+                    "fonts-noto-cjk fonts-noto-color-emoji && "
+                    "sudo rm -rf /var/lib/apt/lists/*"
+                )
+            ],
+        },
+        {
+            "type": "RUN",
+            "args": [
+                (
+                    "npm config set registry https://registry.npmjs.org && "
+                    'sudo env "PATH=$PATH" npm install -g playwright@1.60.0 && '
+                    'sudo env "PATH=$PATH" playwright install --with-deps chromium && '
+                    "npm cache clean --force"
+                )
+            ],
+        },
+        {
+            "type": "RUN",
+            "args": [
+                (
+                    "sudo mkdir -p /opt/game-template /opt/skills /opt/sandbox && "
+                    "sudo chown -R user:user /opt/game-template /opt/skills /opt/sandbox && "
+                    f"curl -fsSL {game} -o /tmp/game-template.tar.gz && "
+                    "tar -xzf /tmp/game-template.tar.gz -C /opt/game-template && "
+                    f"curl -fsSL {skills} -o /tmp/skills.tar.gz && "
+                    "tar -xzf /tmp/skills.tar.gz -C /opt/skills && "
+                    f"curl -fsSL {scripts} -o /tmp/scripts.tar.gz && "
+                    "tar -xzf /tmp/scripts.tar.gz -C /opt/sandbox && "
+                    "cd /opt/game-template && npm ci --no-audit --no-fund && "
+                    "npm cache clean --force"
+                )
+            ],
+        },
+        {
+            "type": "RUN",
+            "args": [
+                (
+                    "sudo chmod +x /opt/sandbox/*.sh && "
+                    "sudo mkdir -p /home/user/workspace /home/user/input "
+                    "/home/user/.cache /tmp/.X11-unix && "
+                    "sudo chmod 1777 /tmp/.X11-unix && "
+                    "sudo chown -R user:user /home/user/workspace /home/user/input "
+                    "/home/user/.cache /opt/game-template && "
+                    "ln -sfn /opt/ms-playwright /home/user/.cache/ms-playwright"
+                )
+            ],
+        },
+    ]
 
 
 def main() -> None:
-    image = os.environ.get("SANDBOX_IMAGE", "").strip()
-    if not image:
-        raise SystemExit("请设置 SANDBOX_IMAGE，例如 docker.io/15688463267/ai-game-platform-sandbox:v1")
     name = os.environ.get("SANDBOX_TEMPLATE_NAME", "").strip()
     if not name:
         name = f"ai-game-platform-sbx-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
 
     print(f"构建模板：{name}")
-    print(f"镜像：{image}")
-    print("规格：1 vCPU / 1024 MB（一代 runtime）")
+    print("规格：1 vCPU / 1024 MB")
+    print(f"基础镜像：{BASE_IMAGE}")
 
-    # 一代 runtime 不支持 start_command/ready_command；预览服务由后端在创建后启动。
-    builder = Template().from_image(image)
-
-    last = 0.0
-
-    def on_log(entry):  # type: ignore[no-untyped-def]
-        nonlocal last
-        now = time.monotonic()
-        if now - last < 0.5:
-            return
-        last = now
-        message = getattr(entry, "message", str(entry))
-        print(message)
-
-    info = Template.build(
-        builder,
-        name=name,
-        cpu_count=1,
-        memory_mb=1024,
-        api_key=settings.e2b_api_key,
-        api_url=settings.e2b_api_url,
-        domain=settings.e2b_domain,
-        on_build_logs=on_log,
+    BUILD_DIR.mkdir(exist_ok=True)
+    game_tar = _tar_dir(
+        SANDBOX_DIR / "game-template",
+        BUILD_DIR / "game-template.tar.gz",
+        {"node_modules", ".runtime", "dist", ".git"},
     )
-    print("模板构建完成")
-    print(f"TEMPLATE_ID={info.template_id}")
-    print(f"BUILD_ID={info.build_id}")
-    print("把 TEMPLATE_ID 写入 .env 的 E2B_TEMPLATE。")
+    skills_tar = _tar_dir(
+        SANDBOX_DIR / "assets" / "skills",
+        BUILD_DIR / "skills.tar.gz",
+        set(),
+    )
+    scripts_tar = _tar_scripts(BUILD_DIR / "scripts.tar.gz")
+
+    prefix = f"{settings.oss_prefix.strip('/')}/build/{name}"
+    try:
+        urls = asyncio.run(
+            _upload(
+                prefix,
+                {
+                    "game-template.tar.gz": game_tar,
+                    "skills.tar.gz": skills_tar,
+                    "scripts.tar.gz": scripts_tar,
+                },
+            )
+        )
+        print("构建文件已上传 OSS")
+
+        body = {
+            "name": name,
+            "teamID": TEAM_ID,
+            "runtimeConfig": {
+                "cpu": 1.0,
+                "memorySize": 1024,
+                "diskSize": 15360,
+                "internetAccess": True,
+                "sandboxConfig": {
+                    "generation": 2,
+                    "image": BASE_IMAGE,
+                    "steps": _build_steps(urls),
+                },
+            },
+        }
+        created = _aliyun("CreateTemplate", "--body", json.dumps(body))
+        template_id = created.get("templateID")
+        if not template_id:
+            raise SystemExit(f"创建模板失败：{created}")
+        print(f"templateID={template_id}，等待构建...")
+
+        deadline = time.time() + 1800
+        while True:
+            got = _aliyun(
+                "GetTemplate",
+                "--teamID",
+                TEAM_ID,
+                "--templateID",
+                template_id,
+            )
+            status = got.get("status", {})
+            state = status.get("state")
+            print(f"{datetime.now(UTC).strftime('%H:%M:%S')} {state}")
+            if state == "ready":
+                break
+            if state == "error":
+                reason = status.get("reason", {})
+                raise SystemExit(f"模板构建失败：{reason.get('message', reason)}")
+            if time.time() > deadline:
+                raise SystemExit("模板构建超时")
+            time.sleep(10)
+
+        print("模板构建完成")
+        print(f"TEMPLATE_ID={template_id}")
+        print("把 TEMPLATE_ID 写入 .env 的 E2B_TEMPLATE。")
+    finally:
+        shutil.rmtree(BUILD_DIR, ignore_errors=True)
 
 
 if __name__ == "__main__":
