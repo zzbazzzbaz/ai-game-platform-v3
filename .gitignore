@@ -1,0 +1,14 @@
+.env
+.DS_Store
+.idea/
+.vscode/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+backend/.venv/
+backend/*.egg-info/
+node_modules/
+dist/
+.runtime/
+*.log
