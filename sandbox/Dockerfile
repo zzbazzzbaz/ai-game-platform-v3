@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
-# 阿里云 Agent Sandbox 自定义镜像：在官方 MicroVM base 上叠加游戏运行环境。
-# 1C1G 运行时请使用 ai-game-platform-sandbox 模板；镜像本身不限制规格。
-FROM fc-e2b-registry.cn-hangzhou.cr.aliyuncs.com/runtime-v2/base:v0.0.53
+# 阿里云 Agent Sandbox 自定义镜像：在官方一代 base 上叠加游戏运行环境。
+# 二代 MicroVM（runtime-v2）需要账号白名单；这里使用已具备模板加速的一代 base。
+FROM fc-e2b-registry.cn-hangzhou.cr.aliyuncs.com/runtime/base:v0.0.52
 
 USER root
 

@@ -124,6 +124,7 @@ class SandboxRegistry:
         handle = await self.ensure(game_id)
         sandbox = await self._connect(handle.sandbox_id)
         await self._prepare_workspace(sandbox)
+        await self._start_display_services(sandbox)
         await self._start_game_server(sandbox)
         await self._wait_game_ready(sandbox)
         urls = await self._preview_urls(sandbox)
@@ -263,6 +264,7 @@ class SandboxRegistry:
                 await self._download_snapshot(sandbox, row.snapshot_key, row.snapshot_sha256)
             else:
                 await self._prepare_workspace(sandbox)
+            await self._start_display_services(sandbox)
             await self._set_state(
                 game_id,
                 "active",
@@ -526,6 +528,9 @@ class SandboxRegistry:
             "/opt/sandbox/prepare-workspace.sh",
             timeout=120,
         )
+
+    async def _start_display_services(self, sandbox: e2b.AsyncSandbox) -> None:
+        await self._run(sandbox, "/opt/sandbox/start-services.sh", timeout=60)
 
     async def _stop_game_server(self, sandbox: e2b.AsyncSandbox) -> None:
         await self._run(

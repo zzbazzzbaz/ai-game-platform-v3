@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 from datetime import UTC, datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from e2b import Template
 
@@ -19,16 +23,10 @@ def main() -> None:
 
     print(f"构建模板：{name}")
     print(f"镜像：{image}")
-    print("规格：1 vCPU / 1024 MB")
+    print("规格：1 vCPU / 1024 MB（一代 runtime）")
 
-    builder = (
-        Template()
-        .from_image(image)
-        .set_start_cmd(
-            "/bin/bash -lc /opt/sandbox/start-services.sh",
-            "/bin/bash -lc /opt/sandbox/ready.sh",
-        )
-    )
+    # 一代 runtime 不支持 start_command/ready_command；预览服务由后端在创建后启动。
+    builder = Template().from_image(image)
 
     last = 0.0
 
